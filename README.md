@@ -1,86 +1,75 @@
 # censorcheck
 
-A bash script for checking the accessibility of websites potentially affected by Deep Packet Inspection (DPI) blocking or geographic restrictions.
+A lightweight shell script for assessing the accessibility of websites potentially subject to Deep Packet Inspection (DPI) or geographic restrictions. Designed for environments with BusyBox/ash (e.g., OpenWrt routers) and POSIX‑compatible systems.
 
-![image](https://i.imgur.com/qBWKkWU.png)
+## Important Note on Status Codes
 
-## Important note about status codes
+Some websites may not return expected HTTP status codes due to security or anti‑bot measures:
 
-> [!WARNING]
-> Some websites may not return expected status codes due to various security measures
-
-- Sites like [chatgpt.com](https://chatgpt.com), [claude.ai](https://claude.ai) consistently return `403` status due to JavaScript verification checks, even when accessed from unrestricted locations
-- Sites like [intel.com](https://intel.com) may return `200` status but still display blocking notifications in the actual content
-- Results should be verified manually when behavior seems inconsistent with your actual location
+- Services such as `chatgpt.com` and `claude.ai` consistently return `403` because of JavaScript verification, even when accessed from unrestricted regions.
+- Websites like `intel.com` may respond with `200` but still display blocking notifications in their content.
+- Results should be verified manually if the behaviour appears inconsistent with the actual location.
 
 ## Features
 
-- Tests both HTTP and HTTPS protocols for each domain
-- Detects different access scenarios: available, blocked, redirected, or access denied
-- Includes predefined lists of commonly DPI-blocked and geo-restricted websites
-- Supports custom domain lists via file input
-- Configurable connection timeout and retry parameters
-- Color-coded output for easy readability
+- Tests both HTTP and HTTPS protocols for each domain.
+- Detects various access outcomes: available, blocked, redirected, or access denied.
+- Includes predefined lists of commonly DPI‑blocked and geo‑restricted websites.
+- Supports custom domain lists via an input file.
+- Configurable connection timeout and retry parameters.
+- Colour‑coded terminal output for readability.
+- Optional JSON output for integration with other tools.
+- Detects DNS hijacking by comparing responses from regular DNS and DNS‑over‑HTTPS.
+- Compatible with BusyBox/ash (OpenWrt, embedded systems) and full POSIX environments.
 
 ## Included Domain Lists
 
-The script contains predefined lists of websites commonly affected by:
+The script ships with two predefined sets of domains:
 
-- **DPI Blocking**: Includes social media, video platforms, and other commonly restricted services
-- **Geographic Restrictions**: Popular streaming services and platforms that implement geo-blocking
+- **DPI Blocking** – social media, video platforms, and other frequently restricted services.
+- **Geographic Restrictions** – popular streaming services and platforms that enforce geo‑blocking.
 
 ## Dependencies
 
-- bash
-- curl
-- nslookup
-- netcat
+- `curl` – for HTTP/HTTPS requests.
+- `nslookup` – for DNS resolution (typically provided by `dnsutils` or BusyBox).
+- `netcat` – for basic IP reachability checks; **Ncat** (from Nmap) is recommended for full timeout support.  
+  *On BusyBox systems without Ncat, a fallback using `timeout` + `nc` is attempted.*
 
-## Usage
+## Installation
 
-For local usage, download the script:
+Download the script and make it executable:
 
-```bash
-wget https://github.com/vernette/censorcheck/raw/master/censorcheck.sh
+```sh
+wget https://github.com/yourusername/censorcheck/raw/main/censorcheck.sh
 chmod +x censorcheck.sh
 ```
 
-### Common Use Cases
+## Usage
 
-```bash
-# Show help message
-./censorcheck.sh --help
+Basic examples
 
-# Check DPI-blocked sites
-./censorcheck.sh --mode dpi
-
-# Check DPI-blocked sites using IPv6
-./censorcheck.sh --mode dpi --ipv6
-
-# Check custom domain list with increased timeout and retries
-./censorcheck.sh --file sites.txt --timeout 10 --retries 3
-
-# Check if a specific site is accessible through a proxy
-./censorcheck.sh --domain example.com --proxy 127.0.0.1:1080
-
-# Check only HTTP protocol for a specific domain
-./censorcheck.sh --domain example.com --http-only
-
-# Check only HTTPS protocol for all DPI-blocked sites
-./censorcheck.sh --mode dpi --https-only
+```sh
+./censorcheck.sh --help # Display help
+./censorcheck.sh --mode dpi # Check only DPI‑blocked sites
+./censorcheck.sh --mode both --ipv6 # Use IPv6 for all checks
+./censorcheck.sh --file my-sites.txt --timeout 10 --retries 3 # Check domains from a custom file with extended timeout
+./censorcheck.sh --domain example.com --proxy 127.0.0.1:1080 # Test a single domain through a SOCKS5 proxy
+./censorcheck.sh --domain example.com --https-only # Test only HTTPS for a specific domain
+./censorcheck.sh --mode dpi --json # Output results in JSON format
 ```
 
-You could run the script directly from GitHub:
+You can also run the script directly from a URL (if wget is available):
 
-```bash
-bash <(wget -qO- https://github.com/vernette/censorcheck/raw/master/censorcheck.sh) --mode dpi
+```sh
+ash <(wget -qO- https://github.com/yourusername/censorcheck/raw/main/censorcheck.sh) --mode dpi
 ```
 
-All options available in the help message (`-h, --help`) can be used and combined.
+*All options listed in the help message can be combined.*
 
 ## Options
 
-```
+```sh
 Usage: censorcheck.sh [OPTIONS]
 
 Checks accessibility of websites that might be blocked by DPI or geolocation restrictions
@@ -90,8 +79,8 @@ Options:
   -m, --mode         Set checking mode: 'dpi', 'geoblock', or 'both' (default: both)
   -t, --timeout      Set connection timeout in seconds (default: 5)
   -r, --retries      Set number of connection retries (default: 2)
-  -u, --user-agent   Set custom User-Agent string (default: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:129.0) Gecko/20100101 Firefox/129.0)
-  -f, --file         Read domains from specified file instead of using built-in lists
+  -u, --user-agent   Set custom User-Agent string (default: Mozilla/5.0 ...)
+  -f, --file         Read domains from specified file instead of built-in lists
   -6, --ipv6         Use IPv6 (default: IPv4)
   -p, --proxy        Use SOCKS5 proxy (format: host:port)
   -d, --domain       Specify a single domain to check
@@ -100,25 +89,25 @@ Options:
   -j, --json         Output results in JSON format
 
 Examples:
-  censorcheck.sh                               # Check all predefined domains with default settings
+  censorcheck.sh                               # Check all predefined domains
   censorcheck.sh --mode dpi                    # Check only DPI-blocked sites
-  censorcheck.sh --timeout 10 --retries 3      # Use longer timeout and more retries
-  censorcheck.sh --user-agent "MyAgent/1.0"    # Use custom User-Agent
+  censorcheck.sh --timeout 10 --retries 3      # Longer timeout and more retries
+  censorcheck.sh --user-agent "MyAgent/1.0"    # Custom User-Agent
   censorcheck.sh --file my-domains.txt         # Check domains from custom file
-  censorcheck.sh --ipv6                        # Use IPv6 instead of IPv4
-  censorcheck.sh --proxy 127.0.0.1:1080        # Check domains using SOCKS5 proxy
+  censorcheck.sh --ipv6                        # Use IPv6
+  censorcheck.sh --proxy 127.0.0.1:1080        # Check via SOCKS5 proxy
   censorcheck.sh --domain example.com          # Check a single domain
-  censorcheck.sh --file my-domains.txt --json  # Check custom domains and output JSON
-
-The domain file should contain one domain per line. Lines starting with # are ignored
+  censorcheck.sh --file my-domains.txt --json  # Output JSON
 ```
 
-## Custom domain list
+The domain file should contain one domain per line. Lines starting with # are ignored.
 
-You can check your own list of domains by creating a text file with one domain per line:
+## Custom Domain List
 
-```
-# My custom domains to check
+Create a plain text file with one domain per line:
+
+```text
+# My custom domains
 example.com
 test-site.net
 # Commented lines are ignored
@@ -127,28 +116,27 @@ another-domain.org
 # Empty lines are also ignored
 ```
 
-Then run the script with:
+Then run:
 
-```bash
+```sh
 ./censorcheck.sh --file my-domains.txt
 ```
 
-## Test results
+## Output Interpretation
 
-The script provides color-coded results for each domain:
+The script produces colour‑coded output (unless JSON mode is enabled):
 
-- **Green**: Site is available (HTTP 200)
-- **Red**: Site is blocked, unreachable, or access denied (HTTP 403)
-- **Blue**: Site redirects to another URL
-- **Orange**: Other HTTP status codes
+- Green – Site is available (HTTP 200).
+- Red – Site is blocked, unreachable, or returns access denied (HTTP 403).
+- Blue – Site redirects to another URL.
+- Orange – Other HTTP status codes.
+
+When DNS hijacking is detected, a warning is displayed before the results.
 
 ## Contributing
 
-Contributions are welcome! Feel free to submit pull requests to add new domains to the predefined lists or improve the script's functionality.
+Contributions are welcome. Please submit pull requests to enhance functionality, add new domains to the predefined lists, or improve compatibility.
 
 ## TODO
 
-- [x] DNS spoofing detection by ISP or hosting provider
-- [x] Results table
-- [x] JSON output
-- [ ] Debug mode
+All things from original repo.
