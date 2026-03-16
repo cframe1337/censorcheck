@@ -746,18 +746,10 @@ summarize_protocol_result() {
 }
 
 add_text_result_row() {
-    local service=$1
-    local ip=$2
-    local http_cell=$3
-    local https_cell=$4
-    local entry
-    entry=$(jq -n \
-        --arg service "$service" \
-        --arg ip "$ip" \
-        --arg http "$http_cell" \
-        --arg https "$https_cell" \
-        '{service: $service, ip: $ip, http: $http, https: $https}')
-    TEXT_RESULTS="${TEXT_RESULTS}${entry}\n"
+    local service=$1 ip=$2 http_cell=$3 https_cell=$4
+    http_cell=$(echo "$http_cell" | tr '\t' ' ' | tr '\n' ' ')
+    https_cell=$(echo "$https_cell" | tr '\t' ' ' | tr '\n' ' ')
+    TABLE_DATA="${TABLE_DATA}${service}	${ip}	${http_cell}	${https_cell}\n"
 }
 
 add_text_result_from_json() {
