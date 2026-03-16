@@ -775,28 +775,15 @@ add_text_result_from_json() {
 
 print_table_results() {
     printf "\n"
-    printf "\033[1m%b%s\t%s\t%s\t%s%b\033[0m\n" \
-        "$COLOR_WHITE" \
-        "Service" \
-        "IP" \
-        "HTTP" \
-        "HTTPS" \
-        "$COLOR_RESET"
-
-    echo "$TEXT_RESULTS" | while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        local service ip http https
-        service=$(echo "$line" | jq -r '.service')
-        ip=$(echo "$line" | jq -r '.ip')
-        http=$(echo "$line" | jq -r '.http')
-        https=$(echo "$line" | jq -r '.https')
-
-        printf "%s\t%s\t" "$service" "$ip"
+    printf "\033[1m%-30s %-15s %-10s %-10s\033[0m\n" "Service" "IP" "HTTP" "HTTPS"
+    echo "$TABLE_DATA" | while IFS="	" read -r service ip http https; do
+        [ -z "$service" ] && continue
+        printf "%-30s %-15s " "$service" "$ip"
         colorize_summary "$http"
-        printf "\t"
+        printf " "
         colorize_summary "$https"
         printf "\n"
-    done | column -t -s $'\t'
+    done
 }
 
 run_checks_and_print() {
@@ -808,7 +795,7 @@ run_checks_and_print() {
     local total_domains=$#
     local current_index=0
 
-    TEXT_RESULTS=""
+    TABLE_DATA=""
 
     if ! $JSON_OUTPUT; then
         print_header
