@@ -41,7 +41,7 @@ The script ships with two predefined sets of domains:
 Download the script and make it executable:
 
 ```sh
-wget https://github.com/yourusername/censorcheck/raw/main/censorcheck.sh
+wget https://raw.githubusercontent.com/cframe1337/censorcheck/refs/heads/master/censorcheck.sh
 chmod +x censorcheck.sh
 ```
 
@@ -62,7 +62,7 @@ Basic examples
 You can also run the script directly from a URL (if wget is available):
 
 ```sh
-ash <(wget -qO- https://github.com/yourusername/censorcheck/raw/main/censorcheck.sh) --mode dpi
+ash <(wget -qO- https://raw.githubusercontent.com/cframe1337/censorcheck/refs/heads/master/censorcheck.sh) --mode dpi
 ```
 
 *All options listed in the help message can be combined.*
