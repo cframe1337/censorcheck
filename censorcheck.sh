@@ -1,8 +1,9 @@
 #!/bin/sh
 
 readonly SCRIPT_NAME=$(basename "$0")
-DEPENDENCIES="curl nslookup netcat jq"
+DEPENDENCIES="curl jq"
 
+# Colors
 readonly COLOR_WHITE="\033[97m"
 readonly COLOR_RED="\033[31m"
 readonly COLOR_GREEN="\033[32m"
@@ -11,6 +12,7 @@ readonly COLOR_ORANGE="\033[33m"
 readonly COLOR_RESET="\033[0m"
 readonly CURL_SEPARATOR="--UNIQUE-SEPARATOR--"
 
+# Config
 DNS_SERVERS="1.1.1.1 8.8.8.8 9.9.9.9"
 DOH_SERVERS="https://cloudflare-dns.com/dns-query https://dns.google/dns-query https://dns.quad9.net/dns-query"
 
@@ -28,6 +30,7 @@ JSON_OUTPUT=false
 DPI_BLOCKED_SITES="youtube.com discord.com instagram.com facebook.com x.com linkedin.com rutracker.org digitalocean.com amnezia.org getoutline.org mailfence.com flibusta.is rezka.ag"
 GEO_BLOCKED_SITES="spotify.com netflix.com patreon.com swagger.io snyk.io mongodb.com autodesk.com graylog.org redis.io"
 
+# Messages
 readonly MSG_AVAILABLE="Available"
 readonly MSG_BLOCKED="Blocked"
 readonly MSG_BLOCKED_TEMPLATE="$MSG_BLOCKED or site didn't respond after %ss timeout"
@@ -38,20 +41,15 @@ readonly MSG_OTHER="Responded with status code"
 TEXT_RESULTS=""
 
 error_exit() {
-    local message="$1"
-    local exit_code="${2:-1}"
-    printf "[%b%s%b] %b%s%b\n" "$COLOR_RED" "ERROR" "$COLOR_RESET" "$COLOR_WHITE" "$message" "$COLOR_RESET" >&2
+    printf "[%b%s%b] %b%s%b\n" "$COLOR_RED" "ERROR" "$COLOR_RESET" "$COLOR_WHITE" "$1" "$COLOR_RESET" >&2
     display_help
-    exit "$exit_code"
+    exit "${2:-1}"
 }
 
 show_progress() {
-    local current=$1
-    local total=$2
-    local domain=$3
     if ! $JSON_OUTPUT; then
         printf "\r\033[K%b[%d/%d] Checking:%b %b%s%b" \
-            "$COLOR_BLUE" "$current" "$total" "$COLOR_RESET" "$COLOR_WHITE" "$domain" "$COLOR_RESET"
+            "$COLOR_BLUE" "$1" "$2" "$COLOR_RESET" "$COLOR_WHITE" "$3" "$COLOR_RESET"
     fi
 }
 
@@ -86,37 +84,17 @@ Options:
   --http-only        Test only HTTP
   --https-only       Test only HTTPS
   -j, --json         Output results in JSON format
-
-Examples:
-  $SCRIPT_NAME                               # Check all predefined domains with default settings
-  $SCRIPT_NAME --mode dpi                    # Check only DPI-blocked sites
-  $SCRIPT_NAME --timeout 10 --retries 3      # Use longer timeout and more retries
-  $SCRIPT_NAME --user-agent "MyAgent/1.0"    # Use custom User-Agent
-  $SCRIPT_NAME --file my-domains.txt         # Check domains from custom file
-  $SCRIPT_NAME --ipv6                        # Use IPv6 instead of IPv4
-  $SCRIPT_NAME --proxy 127.0.0.1:1080        # Use SOCKS5 proxy
-  $SCRIPT_NAME --domain example.com          # Check a single domain
-  $SCRIPT_NAME --http-only                   # Test only HTTP
-  $SCRIPT_NAME --https-only                  # Test only HTTPS
-
-The domain file should contain one domain per line. Lines starting with # are ignored
 EOF
 }
 
 is_installed() {
-    local cmd="$1"
-    command -v "$cmd" >/dev/null 2>&1
+    command -v "$1" >/dev/null 2>&1
 }
 
 check_missing_dependencies() {
     local missing=""
     for pkg in $DEPENDENCIES; do
-        cmd="$pkg"
-        case "$pkg" in
-            nslookup) cmd="nslookup" ;;
-            netcat)   cmd="nc" ;;
-        esac
-        if ! is_installed "$cmd"; then
+        if ! is_installed "$pkg"; then
             missing="$missing $pkg"
         fi
     done
@@ -124,8 +102,7 @@ check_missing_dependencies() {
 }
 
 prompt_for_installation() {
-    local missing_pkgs="$1"
-    echo "Missing dependencies:$missing_pkgs"
+    printf "Missing dependencies:%s\n" "$1"
     printf "Do you want to install them? [y/N]: "
     read -r answer
     case "$answer" in
@@ -135,6 +112,10 @@ prompt_for_installation() {
 }
 
 get_package_manager() {
+    if [ -f /etc/openwrt_release ]; then
+        echo "opkg"
+        return
+    fi
     if [ -d /data/data/com.termux ]; then
         echo "termux"
         return
@@ -151,45 +132,18 @@ get_package_manager() {
             *) error_exit "Unknown distribution: $ID. Please install dependencies manually." ;;
         esac
     else
-        error_exit "File /etc/os-release not found, unable to determine distribution. Please install dependencies manually."
+        error_exit "Unable to determine distribution. Please install dependencies manually."
     fi
 }
 
 install_with_package_manager() {
     local pkg_manager="$1"
     shift
-    local packages=""
+    local packages="$*"
     local use_sudo=""
-    for dep in "$@"; do
-        case "$pkg_manager" in
-            apt|termux)
-                case "$dep" in
-                    nslookup) pkg="dnsutils" ;;
-                    netcat)   pkg="netcat-openbsd" ;;
-                    *)        pkg="$dep" ;;
-                esac
-                ;;
-            pacman)
-                case "$dep" in
-                    nslookup) pkg="bind" ;;
-                    netcat)   pkg="openbsd-netcat" ;;
-                    *)        pkg="$dep" ;;
-                esac
-                ;;
-            dnf|yum)
-                case "$dep" in
-                    nslookup) pkg="bind-utils" ;;
-                    netcat)   pkg="netcat" ;;
-                    *)        pkg="$dep" ;;
-                esac
-                ;;
-            *) pkg="$dep" ;;
-        esac
-        packages="$packages $pkg"
-    done
-    if [ "$(id -u)" -ne 0 ]; then
-        use_sudo="sudo"
-    fi
+
+    [ "$(id -u)" -ne 0 ] && use_sudo="sudo"
+
     case "$pkg_manager" in
         apt)
             $use_sudo apt update
@@ -208,6 +162,10 @@ install_with_package_manager() {
             apt update
             apt install -y $packages
             ;;
+        opkg)
+            opkg update
+            opkg install $packages
+            ;;
         *) error_exit "Unknown package manager: $pkg_manager" ;;
     esac
 }
@@ -215,13 +173,11 @@ install_with_package_manager() {
 install_dependencies() {
     local missing_pkgs
     missing_pkgs=$(check_missing_dependencies)
-    if [ -z "$missing_pkgs" ]; then
-        return 0
-    fi
+    [ -z "$missing_pkgs" ] && return 0
+
     prompt_for_installation "$missing_pkgs"
     pkg_manager=$(get_package_manager)
-    set -- $missing_pkgs
-    install_with_package_manager "$pkg_manager" "$@"
+    install_with_package_manager "$pkg_manager" $missing_pkgs
 }
 
 check_ipv6_support() {
@@ -234,92 +190,47 @@ check_ipv6_support() {
 parse_arguments() {
     while [ $# -gt 0 ]; do
         case $1 in
-            -h|--help)
-                display_help
-                exit 0
-                ;;
+            -h|--help) display_help; exit 0 ;;
             -m|--mode)
-                if [ "$2" = "dpi" ] || [ "$2" = "geoblock" ] || [ "$2" = "both" ]; then
-                    MODE=$2
-                else
-                    error_exit "Invalid mode: $2. Valid modes are: dpi, geoblock, both"
-                fi
+                case "$2" in dpi|geoblock|both) MODE=$2 ;;
+                    *) error_exit "Invalid mode: $2" ;; esac
                 shift 2
                 ;;
             -t|--timeout)
-                if echo "$2" | grep -q '^[0-9]\+$'; then
-                    TIMEOUT=$2
-                else
-                    error_exit "Invalid timeout value: $2. Timeout must be a positive integer"
-                fi
+                if echo "$2" | grep -q '^[0-9]\+$'; then TIMEOUT=$2
+                else error_exit "Invalid timeout: $2"; fi
                 shift 2
                 ;;
             -r|--retries)
-                if echo "$2" | grep -q '^[0-9]\+$'; then
-                    RETRIES=$2
-                else
-                    error_exit "Invalid retries value: $2. Retry count must be a positive integer"
-                fi
+                if echo "$2" | grep -q '^[0-9]\+$'; then RETRIES=$2
+                else error_exit "Invalid retries: $2"; fi
                 shift 2
                 ;;
             -u|--user-agent)
-                if [ -n "$2" ]; then
-                    USER_AGENT=$2
-                else
-                    error_exit "User-Agent cannot be empty"
-                fi
+                [ -n "$2" ] && USER_AGENT=$2 || error_exit "User-Agent empty"
                 shift 2
                 ;;
             -f|--file)
-                if [ -n "$2" ]; then
-                    if [ -f "$2" ]; then
-                        DOMAINS_FILE="$2"
-                    else
-                        error_exit "File '$2' does not exist"
-                    fi
-                else
-                    error_exit "File path cannot be empty"
-                fi
+                [ -f "$2" ] && DOMAINS_FILE="$2" || error_exit "File '$2' not found"
                 shift 2
                 ;;
             -6|--ipv6)
-                if ! check_ipv6_support; then
-                    error_exit "IPv6 is not supported on this system"
-                fi
+                check_ipv6_support || error_exit "IPv6 not supported"
                 IP_VERSION="6"
                 shift
                 ;;
             -p|--proxy)
-                if [ -n "$2" ]; then
-                    PROXY="$2"
-                else
-                    error_exit "Proxy address cannot be empty"
-                fi
+                [ -n "$2" ] && PROXY="$2" || error_exit "Proxy address empty"
                 shift 2
                 ;;
             -d|--domain)
-                if [ -n "$2" ]; then
-                    SINGLE_DOMAIN="$2"
-                else
-                    error_exit "Domain cannot be empty"
-                fi
+                [ -n "$2" ] && SINGLE_DOMAIN="$2" || error_exit "Domain empty"
                 shift 2
                 ;;
-            --http-only)
-                PROTOCOL="http"
-                shift
-                ;;
-            --https-only)
-                PROTOCOL="https"
-                shift
-                ;;
-            -j|--json)
-                JSON_OUTPUT=true
-                shift
-                ;;
-            *)
-                error_exit "Unknown option: $1"
-                ;;
+            --http-only) PROTOCOL="http"; shift ;;
+            --https-only) PROTOCOL="https"; shift ;;
+            -j|--json) JSON_OUTPUT=true; shift ;;
+            *) error_exit "Unknown option: $1" ;;
         esac
     done
 }
@@ -339,8 +250,7 @@ print_header() {
 ---------------------------------------------------------------------------------
 EOF
 
-    printf "\nTimeout set to: %b%ss%b\n" "$COLOR_WHITE" "$TIMEOUT" "$COLOR_RESET"
-    printf "Retries set to: %b%s%b\n" "$COLOR_WHITE" "$RETRIES" "$COLOR_RESET"
+    printf "\nTimeout: %b%ss%b | Retries: %b%s%b\n" "$COLOR_WHITE" "$TIMEOUT" "$COLOR_RESET" "$COLOR_WHITE" "$RETRIES" "$COLOR_RESET"
 
     case $MODE in
         dpi) mode="DPI" ;;
@@ -349,45 +259,36 @@ EOF
     esac
 
     if [ -z "$DOMAINS_FILE" ] && [ -z "$SINGLE_DOMAIN" ]; then
-        printf "Mode set to: %b%s%b\n" "$COLOR_WHITE" "$mode" "$COLOR_RESET"
+        printf "Mode: %b%s%b\n" "$COLOR_WHITE" "$mode" "$COLOR_RESET"
     fi
 
-    printf "User-Agent set to: %b%s%b\n" "$COLOR_WHITE" "$USER_AGENT" "$COLOR_RESET"
+    printf "User-Agent: %b%s%b\n" "$COLOR_WHITE" "$USER_AGENT" "$COLOR_RESET"
 
     if [ -n "$DOMAINS_FILE" ]; then
-        printf "Domain mode set to: %buser domains from %s%b\n" "$COLOR_WHITE" "$DOMAINS_FILE" "$COLOR_RESET"
+        printf "Source: %b%s%b\n" "$COLOR_WHITE" "$DOMAINS_FILE" "$COLOR_RESET"
     elif [ -n "$SINGLE_DOMAIN" ]; then
-        printf "Checking single domain: %b%s%b\n" "$COLOR_WHITE" "$SINGLE_DOMAIN" "$COLOR_RESET"
-    else
-        printf "Domain mode set to: %bpredefined domains%b\n" "$COLOR_WHITE" "$COLOR_RESET"
+        printf "Single Domain: %b%s%b\n" "$COLOR_WHITE" "$SINGLE_DOMAIN" "$COLOR_RESET"
     fi
 
-    printf "IP version set to: %bIPv%s%b\n" "$COLOR_WHITE" "$IP_VERSION" "$COLOR_RESET"
+    printf "IP Version: %bIPv%s%b\n" "$COLOR_WHITE" "$IP_VERSION" "$COLOR_RESET"
 
     if [ -n "$PROXY" ]; then
-        printf "SOCKS5 proxy set to: %b%s%b\n" "$COLOR_WHITE" "$PROXY" "$COLOR_RESET"
+        printf "Proxy: %b%s%b\n" "$COLOR_WHITE" "$PROXY" "$COLOR_RESET"
     fi
-
-    case $PROTOCOL in
-        http)  printf "Protocol set to: %bHTTP only%b\n" "$COLOR_WHITE" "$COLOR_RESET" ;;
-        https) printf "Protocol set to: %bHTTPS only%b\n" "$COLOR_WHITE" "$COLOR_RESET" ;;
-        both)  printf "Protocol set to: %bHTTP and HTTPS%b\n" "$COLOR_WHITE" "$COLOR_RESET" ;;
-    esac
 
     check_dns_hijacking
 }
 
 read_domains_from_file() {
-    local file=$1
-    local domains=""
     while IFS= read -r line || [ -n "$line" ]; do
-        # Убираем пробелы в начале и конце
-        line=$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-        if [ -n "$line" ] && ! echo "$line" | grep -q '^#'; then
-            domains="$domains $line"
-        fi
-    done < "$file"
-    echo "$domains"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+
+        case "$line" in
+            ""|\#*) continue ;;
+            *) echo "$line" ;;
+        esac
+    done < "$1"
 }
 
 execute_curl() {
@@ -396,7 +297,12 @@ execute_curl() {
     local follow_redirects=$3
     local ip_version_to_use=${4:-$IP_VERSION}
     local curl_output
-    local curl_opts="-s --compressed -o /dev/null -w \"%{http_code}${CURL_SEPARATOR}%{redirect_url}\" --retry-connrefused --retry-all-errors --retry $RETRIES --connect-timeout $TIMEOUT --max-time $TIMEOUT -$ip_version_to_use -A \"$USER_AGENT\" -H \"Sec-Fetch-Site: none\" -H \"Accept-Language: en-US,en;q=0.5\""
+    local curl_opts="-s --compressed -o /dev/null -w \"%{http_code}${CURL_SEPARATOR}%{redirect_url}\" --retry $RETRIES --connect-timeout $TIMEOUT --max-time $((TIMEOUT * 2)) -A \"$USER_AGENT\""
+
+    case "$ip_version_to_use" in
+        4) curl_opts="$curl_opts -4" ;;
+        6) curl_opts="$curl_opts -6" ;;
+    esac
 
     if [ -n "$PROXY" ]; then
         curl_opts="$curl_opts --proxy socks5://$PROXY"
@@ -414,18 +320,12 @@ execute_curl() {
 }
 
 format_result() {
-    local protocol=$1
-    local status_code=$2
-    local redirect_url=$3
-    local msg
+    local protocol=$1 status_code=$2 redirect_url=$3 msg first_word rest first_word_color
 
     if [ -z "$status_code" ] || [ "$status_code" = "000" ] || [ "$status_code" -eq 0 ]; then
         msg=$(printf "$MSG_BLOCKED_TEMPLATE" "$TIMEOUT")
     elif [ "$status_code" -ge 300 ] && [ "$status_code" -lt 400 ]; then
-        if [ -z "$redirect_url" ]; then
-            redirect_url="<empty>"
-        fi
-        msg=$(printf "$MSG_REDIRECT (%s) to %b%s%b" "$status_code" "$COLOR_WHITE" "$redirect_url" "$COLOR_RESET")
+        msg=$(printf "$MSG_REDIRECT (%s) to %s" "$status_code" "${redirect_url:-<empty>}")
     elif [ "$status_code" -eq 200 ]; then
         msg="$MSG_AVAILABLE ($status_code)"
     elif [ "$status_code" -eq 403 ]; then
@@ -438,11 +338,10 @@ format_result() {
     rest="${msg#* }"
 
     case "$first_word" in
-        Blocked)    first_word_color=$COLOR_RED ;;
-        Available)  first_word_color=$COLOR_GREEN ;;
-        Redirected) first_word_color=$COLOR_BLUE ;;
-        Denied)     first_word_color=$COLOR_RED ;;
-        *)          first_word_color=$COLOR_ORANGE ;;
+        Blocked|Denied) first_word_color=$COLOR_RED ;;
+        Available)      first_word_color=$COLOR_GREEN ;;
+        Redirected)     first_word_color=$COLOR_BLUE ;;
+        *)              first_word_color=$COLOR_ORANGE ;;
     esac
 
     printf "  %b%s%b: %b%s%b %s\n" "$COLOR_WHITE" "$protocol" "$COLOR_RESET" "$first_word_color" "$first_word" "$COLOR_RESET" "$rest"
@@ -463,10 +362,7 @@ get_domains_to_check() {
 }
 
 get_single_check_result() {
-    local domain=$1
-    local protocol=$2
-    local follow_redirects=$3
-    local ip_version=$4
+    local domain=$1 protocol=$2 follow_redirects=$3 ip_version=$4
     local response status_code redirect_url
 
     response=$(execute_curl "$domain" "$protocol" "$follow_redirects" "$ip_version")
@@ -476,34 +372,22 @@ get_single_check_result() {
     jq -n \
         --argjson status "${status_code:-0}" \
         --arg redirect_url "${redirect_url:-}" \
-        '
-        {
-          "status": ($status|tonumber),
-          "redirect_url": (if $redirect_url == "" then null else $redirect_url end)
-        }
-        '
+        '{ "status": ($status|tonumber), "redirect_url": (if $redirect_url == "" then null else $redirect_url end) }'
 }
 
 gather_single_domain_result() {
-    local domain=$1
-    local ipv6_supported=false
+    local domain=$1 ipv6_supported=false
     local http_ipv4=null http_ipv6=null https_ipv4=null https_ipv6=null
 
-    if check_ipv6_support; then
-        ipv6_supported=true
-    fi
+    check_ipv6_support && ipv6_supported=true
 
     if [ "$PROTOCOL" = "both" ] || [ "$PROTOCOL" = "http" ]; then
         http_ipv4=$(get_single_check_result "$domain" "HTTP" false 4)
-        if $ipv6_supported; then
-            http_ipv6=$(get_single_check_result "$domain" "HTTP" false 6)
-        fi
+        if $ipv6_supported; then http_ipv6=$(get_single_check_result "$domain" "HTTP" false 6); fi
     fi
     if [ "$PROTOCOL" = "both" ] || [ "$PROTOCOL" = "https" ]; then
         https_ipv4=$(get_single_check_result "$domain" "HTTPS" true 4)
-        if $ipv6_supported; then
-            https_ipv6=$(get_single_check_result "$domain" "HTTPS" true 6)
-        fi
+        if $ipv6_supported; then https_ipv6=$(get_single_check_result "$domain" "HTTPS" true 6); fi
     fi
 
     jq -n \
@@ -512,54 +396,45 @@ gather_single_domain_result() {
         --argjson http_ipv6 "$http_ipv6" \
         --argjson https_ipv4 "$https_ipv4" \
         --argjson https_ipv6 "$https_ipv6" \
-        '
-        {
-          "service": $service,
-          "http": {
-            "ipv4": $http_ipv4,
-            "ipv6": $http_ipv6
-          },
-          "https": {
-            "ipv4": $https_ipv4,
-            "ipv6": $https_ipv6
-          }
-        }
-        '
+        '{
+            "service": $service,
+            "http": { "ipv4": $http_ipv4, "ipv6": $http_ipv6 },
+            "https": { "ipv4": $https_ipv4, "ipv6": $https_ipv6 }
+        }'
 }
 
 get_domain_ip() {
     local domain=$1
-    nslookup "$domain" 2>/dev/null | awk '/^Address: / && !/#/ {print $2; exit}'
+    # BusyBox nslookup output usually looks like:
+    # Name:      example.com
+    # Address 1: 93.184.216.34
+    # or
+    # Address: 93.184.216.34
+    # We grab the last address field found after the name.
+    nslookup "$domain" 2>/dev/null | awk '/^Name:/ {found=1} found && /^Address/ {print $NF; exit}'
 }
 
 get_domain_ips_via_dns() {
-    local domain=$1
-    local server=$2
-    local output
+    local domain=$1 server=$2 output
     if [ -n "$server" ]; then
         output=$(nslookup "$domain" "$server" 2>/dev/null)
     else
         output=$(nslookup "$domain" 2>/dev/null)
     fi
-    echo "$output" | awk '/Address:/ && !/#/ && !/[:].*[:]/ {print $2}'
+    echo "$output" | awk '/^Address/ {print $NF}'
 }
 
 get_domain_ips_via_doh() {
-    local domain=$1
-    local doh_server=$2
-    curl -s -H "accept: application/dns-json" \
-        "${doh_server}?name=${domain}&type=A" | \
+    local domain=$1 doh_server=$2
+    curl -s -H "accept: application/dns-json" "${doh_server}?name=${domain}&type=A" | \
         jq -r '.Answer[]?.data // empty' 2>/dev/null
 }
 
 have_ip_intersection() {
-    local first_list="$1"
-    local second_list="$2"
-    for ip1 in $first_list; do
-        for ip2 in $second_list; do
-            if [ "$ip1" = "$ip2" ]; then
-                return 0
-            fi
+    local list1="$1" list2="$2"
+    for ip1 in $list1; do
+        for ip2 in $list2; do
+            [ "$ip1" = "$ip2" ] && return 0
         done
     done
     return 1
@@ -567,120 +442,69 @@ have_ip_intersection() {
 
 check_dns_hijacking() {
     local test_domains="rutracker.org linkedin.com flibusta.is"
-    local regular_dns_ips=""
-    local doh_ips=""
-    local hijacked_domain=""
-    local hijacked_ip=""
+    local regular_dns_ips doh_ips hijacked_domain hijacked_ip found_ip
 
     for test_domain in $test_domains; do
-        regular_dns_ips=""
-        doh_ips=""
+        regular_dns_ips=""; doh_ips=""
 
         for dns_server in $DNS_SERVERS; do
             regular_dns_ips=$(get_domain_ips_via_dns "$test_domain" "$dns_server")
-            if [ -n "$regular_dns_ips" ]; then
-                break
-            fi
+            [ -n "$regular_dns_ips" ] && break
         done
 
         for doh_server in $DOH_SERVERS; do
             doh_ips=$(get_domain_ips_via_doh "$test_domain" "$doh_server")
-            if [ -n "$doh_ips" ]; then
-                break
-            fi
+            [ -n "$doh_ips" ] && break
         done
 
-        if [ -z "$regular_dns_ips" ] || [ -z "$doh_ips" ]; then
-            continue
-        fi
-
-        if ! have_ip_intersection "$regular_dns_ips" "$doh_ips"; then
-            hijacked_domain="$test_domain"
-            hijacked_ip=$(echo "$regular_dns_ips" | head -n1)
-            break
+        if [ -n "$regular_dns_ips" ] && [ -n "$doh_ips" ]; then
+            if ! have_ip_intersection "$regular_dns_ips" "$doh_ips"; then
+                hijacked_domain="$test_domain"
+                hijacked_ip=$(echo "$regular_dns_ips" | head -n1)
+                break
+            fi
         fi
     done
 
     if [ -n "$hijacked_domain" ]; then
         printf "\n%b%s%b %s %b%s%b %s %b%s%b\n\n" \
-            "$COLOR_RED" "DNS hijacking detected!" "$COLOR_RESET" \
+            "$COLOR_RED" "DNS HIJACKING DETECTED!" "$COLOR_RESET" \
             "ISP redirects" "$COLOR_WHITE" "$hijacked_domain" "$COLOR_RESET" "to" \
             "$COLOR_RED" "$hijacked_ip" "$COLOR_RESET"
-        printf "%b%s%b\n%b%s%b\n" \
-            "$COLOR_ORANGE" "DNS hijacking may affect the accuracy of this check" "$COLOR_RESET" \
-            "$COLOR_ORANGE" "Configure encrypted DNS (DoH/DoT) on your system" "$COLOR_RESET"
+        printf "%b%s%b\n" "$COLOR_ORANGE" "Warning: DNS hijacking affects check accuracy." "$COLOR_RESET"
     else
-        printf "\n%b%s%b\n" "$COLOR_GREEN" "Good news, no DNS hijacking detected!" "$COLOR_RESET"
+        printf "\n%b%s%b\n" "$COLOR_GREEN" "No DNS hijacking detected." "$COLOR_RESET"
     fi
 }
 
 is_ip_reachable() {
-    local ip="$1"
-    if command -v ncat >/dev/null 2>&1; then
-        ncat -z -w "$TIMEOUT" "$ip" 443 2>/dev/null
-    elif command -v timeout >/dev/null 2>&1 && command -v nc >/dev/null 2>&1; then
-        timeout "$TIMEOUT" nc "$ip" 443 < /dev/null > /dev/null 2>&1
+    if command -v nc >/dev/null 2>&1; then
+        ncat -z -w 2 "$1" 443 2>/dev/null
+        return $?
     else
-        nc "$ip" 443 < /dev/null > /dev/null 2>&1 &
-        local pid=$!
-        sleep "$TIMEOUT"
-        kill -0 $pid 2>/dev/null && kill $pid 2>/dev/null && return 1
-        wait $pid 2>/dev/null
+        curl -s --connect-timeout 2 -o /dev/null "https://$1" 2>/dev/null
         return $?
     fi
 }
 
 make_json_error() {
-    local domain="$1"
-    local error_code="$2"
-
+    local domain="$1" error_code="$2" msg
     case "$error_code" in
-        nxdomain)
-            jq -n --arg service "$domain" '
-                {
-                  "service": $service,
-                  "error": "Domain does not exist",
-                  "error_code": "nxdomain",
-                  "http": null,
-                  "https": null
-                }
-            '
-            ;;
-        blocked_by_ip)
-            jq -n --arg service "$domain" '
-                {
-                  "service": $service,
-                  "error": "Blocked by IP",
-                  "error_code": "blocked_by_ip",
-                  "http": null,
-                  "https": null
-                }
-            '
-            ;;
-        *)
-            jq -n --arg service "$domain" --arg code "$error_code" '
-                {
-                  "service": $service,
-                  "error": "Unknown error",
-                  "error_code": $code,
-                  "http": null,
-                  "https": null
-                }
-            '
-            ;;
+        nxdomain) msg="Domain does not exist" ;;
+        blocked_by_ip) msg="Blocked by IP" ;;
+        *) msg="Unknown error" ;;
     esac
+
+    jq -n --arg service "$domain" --arg msg "$msg" --arg code "$error_code" \
+        '{ "service": $service, "error": $msg, "error_code": $code, "http": null, "https": null }'
 }
 
 summarize_status_description() {
-    local status_code=$1
-    local redirect_url=$2
-    local msg
-
+    local status_code=$1 redirect_url=$2 msg
     if [ -z "$status_code" ] || [ "$status_code" = "000" ] || [ "$status_code" -eq 0 ]; then
         msg=$(printf "$MSG_BLOCKED_TEMPLATE" "$TIMEOUT")
     elif [ "$status_code" -ge 300 ] && [ "$status_code" -lt 400 ]; then
-        [ -z "$redirect_url" ] && redirect_url="<empty>"
-        msg=$(printf "%s (%s) -> %s" "$MSG_REDIRECT" "$status_code" "$redirect_url")
+        msg=$(printf "%s (%s) -> %s" "$MSG_REDIRECT" "$status_code" "${redirect_url:-<empty>}")
     elif [ "$status_code" -eq 200 ]; then
         msg="$MSG_AVAILABLE ($status_code)"
     elif [ "$status_code" -eq 403 ]; then
@@ -692,83 +516,53 @@ summarize_status_description() {
 }
 
 colorize_summary() {
-    local message="$1"
-    local first_word rest first_word_color
-
+    local message="$1" first_word rest color
     first_word="${message%% *}"
-    if [ "$first_word" = "$message" ]; then
-        rest=""
-    else
-        rest="${message#* }"
-    fi
+    rest="${message#* }"
+    [ "$first_word" = "$message" ] && rest=""
 
     case "$first_word" in
-        Blocked)    first_word_color=$COLOR_RED ;;
-        Available)  first_word_color=$COLOR_GREEN ;;
-        Redirected) first_word_color=$COLOR_BLUE ;;
-        Denied)     first_word_color=$COLOR_RED ;;
-        N/A|Skipped) first_word_color=$COLOR_ORANGE ;;
-        *)          first_word_color=$COLOR_ORANGE ;;
+        Blocked|Denied) color=$COLOR_RED ;;
+        Available)      color=$COLOR_GREEN ;;
+        Redirected)     color=$COLOR_BLUE ;;
+        N/A|Skipped)    color=$COLOR_ORANGE ;;
+        *)              color=$COLOR_ORANGE ;;
     esac
 
-    if [ -z "$rest" ]; then
-        printf "%b%s%b" "$first_word_color" "$first_word" "$COLOR_RESET"
-    else
-        printf "%b%s%b %s" "$first_word_color" "$first_word" "$COLOR_RESET" "$rest"
-    fi
+    printf "%b%s%b %s" "$color" "$first_word" "$COLOR_RESET" "$rest"
 }
 
 summarize_protocol_result() {
-    local result_json=$1
-    local protocol=$2
+    local result_json=$1 protocol=$2 data status redirect
 
     if [ "$PROTOCOL" != "both" ] && [ "$PROTOCOL" != "$protocol" ]; then
-        echo "Skipped"
-        return
+        echo "Skipped"; return
     fi
 
-    local data
-    data=$(echo "$result_json" | jq -c --arg protocol "$protocol" '
-        if .[$protocol].ipv4 != null then .[$protocol].ipv4
-        elif .[$protocol].ipv6 != null then .[$protocol].ipv6
-        else null end
-    ')
+    data=$(echo "$result_json" | jq -c --arg p "$protocol" '
+        if .[$p].ipv4.status != 0 then .[$p].ipv4
+        elif .[$p].ipv6.status != 0 then .[$p].ipv6
+        else .[$p].ipv4 end')
 
-    if [ "$data" = "null" ] || [ -z "$data" ]; then
-        echo "N/A"
-        return
-    fi
-
-    local status redirect
     status=$(echo "$data" | jq -r '.status')
     redirect=$(echo "$data" | jq -r '.redirect_url // ""')
-    summarize_status_description "$status" "$redirect"
+
+    if [ "$status" = "null" ] || [ -z "$data" ]; then
+        echo "N/A"
+    else
+        summarize_status_description "$status" "$redirect"
+    fi
 }
 
 add_text_result_row() {
     local service=$1 ip=$2 http_cell=$3 https_cell=$4
-    http_cell=$(echo "$http_cell" | tr '\t' ' ' | tr '\n' ' ')
-    https_cell=$(echo "$https_cell" | tr '\t' ' ' | tr '\n' ' ')
     TABLE_DATA="${TABLE_DATA}${service}	${ip}	${http_cell}	${https_cell}\n"
 }
 
-add_text_result_from_json() {
-    local result_json=$1
-    local ip=$2
-    local service
-    service=$(echo "$result_json" | jq -r '.service')
-    local http_cell https_cell
-
-    http_cell=$(summarize_protocol_result "$result_json" "http")
-    https_cell=$(summarize_protocol_result "$result_json" "https")
-
-    add_text_result_row "$service" "$ip" "$http_cell" "$https_cell"
-}
-
 print_table_results() {
-    printf "\n"
-    printf "\033[1m%-30s %-15s %-10s %-10s\033[0m\n" "Service" "IP" "HTTP" "HTTPS"
-    echo "$TABLE_DATA" | while IFS="	" read -r service ip http https; do
+    printf "\n%b%-30s %-15s %-10s %-10s%b\n" "\033[1m" "Service" "IP" "HTTP" "HTTPS" "\033[0m"
+
+    printf "%b" "$TABLE_DATA" | while IFS="	" read -r service ip http https; do
         [ -z "$service" ] && continue
         printf "%-30s %-15s " "$service" "$ip"
         colorize_summary "$http"
@@ -779,13 +573,11 @@ print_table_results() {
 }
 
 run_checks_and_print() {
-    local domains
-    local all_results_json="[]"
+    local domains all_results_json="[]" current_index=0 total_domains
 
     domains=$(get_domains_to_check)
     set -- $domains
-    local total_domains=$#
-    local current_index=0
+    total_domains=$#
 
     TABLE_DATA=""
 
@@ -794,7 +586,7 @@ run_checks_and_print() {
         printf "\n"
     fi
 
-    for domain; do
+    for domain in $domains; do
         current_index=$((current_index + 1))
         show_progress "$current_index" "$total_domains" "$domain"
 
@@ -805,16 +597,16 @@ run_checks_and_print() {
             if $JSON_OUTPUT; then
                 all_results_json=$(echo "$all_results_json" | jq --argjson item "$(make_json_error "$domain" nxdomain)" '. + [$item]')
             else
-                add_text_result_row "$domain" "N/A" "Domain does not exist" "Domain does not exist"
+                add_text_result_row "$domain" "N/A" "NX Domain" "NX Domain"
             fi
             continue
         fi
 
         if ! is_ip_reachable "$ip_address"; then
-            if $JSON_OUTPUT; then
+             if $JSON_OUTPUT; then
                 all_results_json=$(echo "$all_results_json" | jq --argjson item "$(make_json_error "$domain" blocked_by_ip)" '. + [$item]')
             else
-                add_text_result_row "$domain" "$ip_address" "Blocked by IP" "Blocked by IP"
+                add_text_result_row "$domain" "$ip_address" "IP Blocked" "IP Blocked"
             fi
             continue
         fi
@@ -825,55 +617,16 @@ run_checks_and_print() {
         if $JSON_OUTPUT; then
             all_results_json=$(echo "$all_results_json" | jq --argjson item "$domain_result_json" '. + [$item]')
         else
-            add_text_result_from_json "$domain_result_json" "$ip_address"
+            http_res=$(summarize_protocol_result "$domain_result_json" "http")
+            https_res=$(summarize_protocol_result "$domain_result_json" "https")
+            add_text_result_row "$domain" "$ip_address" "$http_res" "$https_res"
         fi
     done
 
     clear_progress
 
     if $JSON_OUTPUT; then
-        local ipv6_supported=false
-        if check_ipv6_support; then
-            ipv6_supported=true
-        fi
-
-        local ip_version_param_val
-        if $ipv6_supported; then
-            ip_version_param_val="IPv4 & IPv6"
-        else
-            ip_version_param_val="IPv4"
-        fi
-
-        local params_json
-        params_json=$(
-            jq -n \
-                --arg timeout "${TIMEOUT}s" \
-                --arg retries "$RETRIES" \
-                --arg mode "$(echo "$MODE" | tr '[:lower:]' '[:upper:]')" \
-                --arg user_agent "$USER_AGENT" \
-                --arg domain_mode "$(if [ -n "$DOMAINS_FILE" ]; then echo "user domains from $DOMAINS_FILE"; elif [ -n "$SINGLE_DOMAIN" ]; then echo "single domain"; else echo "predefined domains"; fi)" \
-                --arg ip_version "$ip_version_param_val" \
-                --arg protocol "$(if [ "$PROTOCOL" = "both" ]; then echo "HTTP and HTTPS"; elif [ "$PROTOCOL" = "http" ]; then echo "HTTP only"; else echo "HTTPS only"; fi)" \
-                '[
-                  {"key":"timeout", "value":$timeout},
-                  {"key":"retries", "value":$retries},
-                  {"key":"mode", "value":$mode},
-                  {"key":"user_agent", "value":$user_agent},
-                  {"key":"domain_mode", "value":$domain_mode},
-                  {"key":"ip_version", "value":$ip_version},
-                  {"key":"protocol", "value":$protocol}
-                ]'
-        )
-
-        jq -n \
-            --argjson params "$params_json" \
-            --argjson results "$all_results_json" \
-            '{
-                "version": 1,
-                "params": $params,
-                "results": $results
-            }'
-
+        jq -n --argjson results "$all_results_json" '{ "version": 1, "results": $results }'
         return
     fi
 
@@ -882,7 +635,6 @@ run_checks_and_print() {
 
 main() {
     set -e
-
     trap cleanup EXIT INT TERM
 
     install_dependencies
